@@ -1,4 +1,6 @@
 <?php
+
+// import transaction actual code
 ini_set('memory_limit', '4096M');
 ini_set('max_input_vars', '900');
 ini_set('max_execution_time', '1200');
