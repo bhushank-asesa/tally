@@ -5,10 +5,11 @@ ini_set('memory_limit', '4096M');
 ini_set('max_input_vars', '900');
 ini_set('max_execution_time', '1200');
 try {
-    $pdo = new PDO("mysql:host=localhost;dbname=tally-2", "root", "");
+    $pdo = new PDO("mysql:host=localhost;dbname=wasan-tally", "root", "");
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
-    $filePath = "Transactions.xml";
+    $tallyCompanyId = 2;
+    $filePath = "Nashik-Transactions.xml";
     if (!file_exists($filePath)) {
         die("❌ File not found!");
     }
@@ -63,33 +64,34 @@ try {
         $bankName = '';
         $billRef = '';
 
-        $stmt = $pdo->prepare("INSERT INTO vouchers (voucher_guid, voucher_number, date, narration, party_ledger_name, voucher_type, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)");
-        $stmt->execute([$voucherGuid, $voucherNumber, $date, $narration, $partyLedgerName, $voucherType, $createdBy]);
+        $stmt = $pdo->prepare("INSERT INTO vouchers (voucher_guid, voucher_number, date, narration, party_ledger_name, voucher_type, created_by, tally_company_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+        $stmt->execute([$voucherGuid, $voucherNumber, $date, $narration, $partyLedgerName, $voucherType, $createdBy, $tallyCompanyId]);
         $voucherId = $pdo->lastInsertId();
 
-        $ledgerStmt = $pdo->prepare("INSERT INTO voucher_ledger_entries (voucher_id, ledger_name, amount, is_deemed_positive, type) VALUES (?, ?, ?, ?, ?)");
+        $ledgerStmt = $pdo->prepare("INSERT INTO voucher_ledger_entries (voucher_id, ledger_name, amount, is_deemed_positive, type, tally_company_id) VALUES (?, ?, ?, ?, ?, ?)");
         foreach ($ledgerEntries as $entry) {
             $ledgerName = (string) $entry->LEDGERNAME;
             $amount = (float) $entry->AMOUNT;
             $isDeemedPositive = (string) $entry->ISDEEMEDPOSITIVE;
             $type = ($isDeemedPositive === "Yes") ? 'Credit' : 'Debit';
-            $ledgerStmt->execute([$voucherId, $ledgerName, abs($amount), $isDeemedPositive, $type]);
+            $ledgerStmt->execute([$voucherId, $ledgerName, abs($amount), $isDeemedPositive, $type, $tallyCompanyId]);
 
             // Optional: Insert BANKALLOCATIONS if exists
             if ($entry->BANKALLOCATIONS) {
                 foreach ($entry->BANKALLOCATIONS->children() as $bankAlloc) {
-                    $bankStmt = $pdo->prepare("INSERT INTO voucher_bank_allocations (voucher_id, ledger_name, instrument_number, bank_name) VALUES (?, ?, ?, ?)");
+                    $bankStmt = $pdo->prepare("INSERT INTO voucher_bank_allocations (voucher_id, ledger_name, instrument_number, bank_name, tally_company_id) VALUES (?, ?, ?, ?, ?)");
                     $bankStmt->execute([
                         $voucherId,
                         $ledgerName,
                         (string) $bankAlloc->INSTRUMENTNUMBER,
-                        (string) $bankAlloc->BANKNAME
+                        (string) $bankAlloc->BANKNAME,
+                        $tallyCompanyId
                     ]);
                 }
             }
         }
         $inventoryEntries = $voucher->xpath('INVENTORYENTRIES.LIST');
-        $invStmt = $pdo->prepare("INSERT INTO voucher_inventory_entries (voucher_id, stock_item_name, rate, amount, actual_qty, billed_qty) VALUES (?, ?, ?, ?, ?, ?)");
+        $invStmt = $pdo->prepare("INSERT INTO voucher_inventory_entries (voucher_id, stock_item_name, rate, amount, actual_qty, billed_qty, tally_company_id) VALUES (?, ?, ?, ?, ?, ?, ?)");
         foreach ($inventoryEntries as $inv) {
             $invStmt->execute([
                 $voucherId,
@@ -97,30 +99,33 @@ try {
                 (float) $inv->RATE,
                 (float) $inv->AMOUNT,
                 (string) $inv->ACTUALQTY,
-                (string) $inv->BILLEDQTY
+                (string) $inv->BILLEDQTY,
+                $tallyCompanyId
             ]);
         }
         // GST
         $gstDetails = $voucher->xpath('GSTDETAILS.LIST');
-        $gstStmt = $pdo->prepare("INSERT INTO voucher_gst_details (voucher_id, tax_rate, gst_registration_type, taxable_amount) VALUES (?, ?, ?, ?)");
+        $gstStmt = $pdo->prepare("INSERT INTO voucher_gst_details (voucher_id, tax_rate, gst_registration_type, taxable_amount, tally_company_id) VALUES (?, ?, ?, ?, ?)");
         foreach ($gstDetails as $gst) {
             $gstStmt->execute([
                 $voucherId,
                 (float) $gst->TAXRATE,
                 (string) $gst->TAXTYPE,
-                (float) $gst->TAXABLEAMOUNT
+                (float) $gst->TAXABLEAMOUNT,
+                $tallyCompanyId
             ]);
         }
 
         // TDS
         $tdsEntries = $voucher->xpath('TDSENTRIES.LIST');
-        $tdsStmt = $pdo->prepare("INSERT INTO voucher_tds_entries (voucher_id, tds_section_name, tds_amount, assessable_amount) VALUES (?, ?, ?, ?)");
+        $tdsStmt = $pdo->prepare("INSERT INTO voucher_tds_entries (voucher_id, tds_section_name, tds_amount, assessable_amount, tally_company_id) VALUES (?, ?, ?, ?, ?)");
         foreach ($tdsEntries as $tds) {
             $tdsStmt->execute([
                 $voucherId,
                 (string) $tds->NATUREOFPAYMENT,
                 (float) $tds->TDSAMOUNT,
-                (float) $tds->ASSESSABLEAMOUNT
+                (float) $tds->ASSESSABLEAMOUNT,
+                $tallyCompanyId
             ]);
         }
         $pdo->commit();

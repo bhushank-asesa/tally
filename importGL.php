@@ -4,10 +4,12 @@ ini_set('memory_limit', '2048M');
 ini_set('max_input_vars', '600'); // Example: Set max input variables to 3000
 ini_set('max_execution_time', '900');
 try {
-    $pdo = new PDO("mysql:host=localhost;dbname=tally", "root", "");
+    $pdo = new PDO("mysql:host=localhost;dbname=wasan-tally", "root", "");
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
-    $filePath = "Master.xml";
+    $tallyCompanyId = 2;
+
+    $filePath = "Nashik-Master.xml";
     if (!file_exists($filePath)) {
         die("❌ File not found!");
     }
@@ -40,7 +42,7 @@ try {
     }
 
     // Step 1: Import groups and ledgers
-    $insert = $pdo->prepare("INSERT IGNORE INTO tally_hierarchy (name, type, parent_name, guid) VALUES (:name, :type, :parent, :guid)");
+    $insert = $pdo->prepare("INSERT IGNORE INTO ledgers (name, type, parent_name, guid, tally_company_id) VALUES (:name, :type, :parent, :guid, :tally_company_id)");
 
     foreach ($xml->BODY->IMPORTDATA->REQUESTDATA->TALLYMESSAGE as $msg) {
         if (isset($msg->GROUP)) {
@@ -48,14 +50,16 @@ try {
                 ':name' => (string) $msg->GROUP['NAME'],
                 ':type' => 'group',
                 ':parent' => (string) $msg->GROUP->PARENT ?: null,
-                ':guid' => (string) $msg->GROUP->GUID
+                ':guid' => (string) $msg->GROUP->GUID,
+                ':tally_company_id' => (string) $tallyCompanyId,
             ]);
         } elseif (isset($msg->LEDGER)) {
             $insert->execute([
                 ':name' => (string) $msg->LEDGER['NAME'],
                 ':type' => 'ledger',
                 ':parent' => (string) $msg->LEDGER->PARENT ?: null,
-                ':guid' => (string) $msg->LEDGER->GUID
+                ':guid' => (string) $msg->LEDGER->GUID,
+                ':tally_company_id' => (string) $tallyCompanyId,
             ]);
         }
     }
@@ -78,19 +82,7 @@ try {
         return ['path' => implode(' → ', $path), 'top' => $topParent];
     }
 
-    // $selectAll = $pdo->query("SELECT id, name FROM tally_hierarchy");
-    // $update = $pdo->prepare("UPDATE tally_hierarchy SET full_path = :path, top_parent = :top WHERE id = :id");
-
-    // foreach ($selectAll as $row) {
-    //     $hierarchy = buildHierarchyPath($pdo, $row['name']);
-    //     $update->execute([
-    //         ':path' => $hierarchy['path'],
-    //         ':top' => $hierarchy['top'],
-    //         ':id' => $row['id']
-    //     ]);
-    // }
-
-    echo "✅ Done! Imported hierarchy with full_path and top_parent.\n";
+    echo "✅ Done! Imported hierarchy with parent name.\n";
 } catch (Exception $e) {
     echo "❌ Error: " . $e->getMessage() . " at line " . $e->getLine() . "\n";
 }
