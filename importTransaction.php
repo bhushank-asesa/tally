@@ -5,7 +5,7 @@ ini_set('memory_limit', '4096M');
 ini_set('max_input_vars', '900');
 ini_set('max_execution_time', '1200');
 try {
-    $pdo = new PDO("mysql:host=localhost;dbname=wasan-tally", "root", "");
+    $pdo = new PDO("mysql:host=localhost;dbname=wasan-tally-2", "root", "");
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
     $tallyCompanyId = 2;

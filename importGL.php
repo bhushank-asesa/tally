@@ -4,7 +4,7 @@ ini_set('memory_limit', '2048M');
 ini_set('max_input_vars', '600'); // Example: Set max input variables to 3000
 ini_set('max_execution_time', '900');
 try {
-    $pdo = new PDO("mysql:host=localhost;dbname=wasan-tally", "root", "");
+    $pdo = new PDO("mysql:host=localhost;dbname=wasan-tally-2", "root", "");
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
     $tallyCompanyId = 2;
@@ -42,7 +42,7 @@ try {
     }
 
     // Step 1: Import groups and ledgers
-    $insert = $pdo->prepare("INSERT IGNORE INTO ledgers (name, type, parent_name, guid, tally_company_id) VALUES (:name, :type, :parent, :guid, :tally_company_id)");
+    $insert = $pdo->prepare("INSERT INTO ledgers (name, type, parent_name, guid, tally_company_id) VALUES (:name, :type, :parent, :guid, :tally_company_id)");
 
     foreach ($xml->BODY->IMPORTDATA->REQUESTDATA->TALLYMESSAGE as $msg) {
         if (isset($msg->GROUP)) {
