@@ -1,0 +1,74 @@
+<?php
+
+ini_set('memory_limit', '4096M');
+ini_set('max_execution_time', '3600');
+
+require "clean_xml.php";
+
+$input = "../Transactions.xml";
+$cleanFile = "cleaned.xml";
+
+// STEP 1: CLEAN FILE
+cleanXmlFile($input, $cleanFile);
+
+// STEP 2: READ USING XMLReader
+$pdo = require "db.php";
+
+$reader = new XMLReader();
+if (!$reader->open($cleanFile)) {
+    die("❌ Cannot open cleaned.xml\n");
+}
+
+echo "➡ Importing vouchers...\n";
+
+$voucherCount = 0;
+$tallyMsgCount = 0;
+
+$insert = $pdo->prepare("
+    INSERT INTO vouchers (guid, vouchertype, date, narration, amount)
+    VALUES (?, ?, ?, ?, ?)
+");
+
+while ($reader->read()) {
+
+    // Only target <TALLYMESSAGE>
+    if ($reader->nodeType === XMLReader::ELEMENT && $reader->name === "TALLYMESSAGE") {
+        $tallyMsgCount++;
+
+        // Extract node string
+        $xmlString = $reader->readOuterXml();
+
+        // Skip empty nodes
+        if (trim($xmlString) === '') continue;
+
+        // Convert to SimpleXML
+        $msg = simplexml_load_string($xmlString);
+        if (!$msg) continue;
+
+        // Skip if VOUCHER not present
+        if (!isset($msg->VOUCHER)) continue;
+
+        $voucher = $msg->VOUCHER;
+        $voucherCount++;
+
+        // Read fields
+        $guid        = (string)$voucher->GUID;
+        $type        = (string)$voucher->VOUCHERTYPENAME;
+        $date        = (string)$voucher->DATE;
+        $narration   = (string)$voucher->NARRATION;
+        $amount      = isset($voucher->AMOUNT) ? (float)$voucher->AMOUNT : 0;
+
+        // Insert
+        // $insert->execute([$guid, $type, $date, $narration, $amount]);
+
+        // Move reader forward (required)
+        $reader->next();
+    }
+}
+
+$reader->close();
+
+echo "--------------------------------------\n";
+echo "✔ TALLYMESSAGE Found: $tallyMsgCount\n";
+echo "✔ Vouchers Imported: $voucherCount\n";
+echo "--------------------------------------\n";

@@ -2,14 +2,16 @@
 // import masters actual code 1
 ini_set('memory_limit', '2048M');
 ini_set('max_input_vars', '600'); // Example: Set max input variables to 3000
-ini_set('max_execution_time', '900');
+ini_set('max_execution_time', '2100');
+ini_set('post_max_size', '2048M');
+ini_set('upload_max_filesize', '2048M');
 try {
-    $pdo = new PDO("mysql:host=localhost;dbname=wasan-tally-2", "root", "");
+    $pdo = new PDO("mysql:host=localhost;dbname=wasan_tally_dec", "root", "");
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
-    $tallyCompanyId = 2;
+    $tallyCompanyId = 1;
 
-    $filePath = "Nashik-Master.xml";
+    $filePath = "Master.xml";
     if (!file_exists($filePath)) {
         die("❌ File not found!");
     }

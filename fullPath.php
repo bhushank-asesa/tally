@@ -2,9 +2,11 @@
 // import masters actual code 2
 ini_set('memory_limit', '2048M');
 ini_set('max_input_vars', '600'); // Example: Set max input variables to 3000
-ini_set('max_execution_time', '1800');
+ini_set('max_execution_time', '2100');
+ini_set('post_max_size', '2048M');
+ini_set('upload_max_filesize', '2048M');
 try {
-    $pdo = new PDO("mysql:host=localhost;dbname=wasan-tally-2", "root", "");
+    $pdo = new PDO("mysql:host=localhost;dbname=wasan_tally_dec", "root", "");
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     $str = "";
     function buildHierarchyPath($pdo, $name, &$str)
@@ -13,7 +15,7 @@ try {
         $topParent = null;
         while ($name) {
             $str .= "<br/>In While for $name -> ";
-            $stmt = $pdo->prepare("select name, parent_name FROM ledgers WHERE tally_company_id = 2 and name = :name LIMIT 1");
+            $stmt = $pdo->prepare("select name, parent_name FROM ledgers WHERE tally_company_id = 1 and name = :name LIMIT 1");
             $stmt->execute([':name' => $name]);
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
             if (!$row)
@@ -24,10 +26,10 @@ try {
         }
         return ['path' => json_encode($path), 'top' => $topParent];
     }
-    $page = 1;
+    $page = 7;
     $limit = 2000;
     $offset = ($page - 1) * $limit;
-    $selectAll = $pdo->query("select id, name FROM ledgers where tally_company_id = 2 and top_parent is null order by id asc limit $offset, $limit");
+    $selectAll = $pdo->query("select id, name FROM ledgers where tally_company_id = 1 and top_parent is null order by id asc limit $offset, $limit");
     $update = $pdo->prepare("update ledgers SET path = :path, top_parent = :top WHERE id = :id");
 
     foreach ($selectAll as $row) {

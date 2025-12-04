@@ -1,15 +1,17 @@
 <?php
 
 // import transaction actual code
-ini_set('memory_limit', '4096M');
+ini_set('memory_limit', '8192M');
 ini_set('max_input_vars', '900');
-ini_set('max_execution_time', '1200');
+ini_set('max_execution_time', '2400');
+ini_set('post_max_size', '2048M');
+ini_set('upload_max_filesize', '2048M');
 try {
-    $pdo = new PDO("mysql:host=localhost;dbname=wasan-tally-2", "root", "");
+    $pdo = new PDO("mysql:host=localhost;dbname=wasan_tally_dec", "root", "");
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
-    $tallyCompanyId = 2;
-    $filePath = "Nashik-Transactions.xml";
+    $tallyCompanyId = 1;
+    $filePath = "Transactions.xml";
     if (!file_exists($filePath)) {
         die("❌ File not found!");
     }
