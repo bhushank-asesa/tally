@@ -103,7 +103,10 @@ function formatTime($seconds) {
 require "clean_xml.php";
 
 $input = "../Transactions.xml";
-$cleanFile = "cleaned.xml";
+$cleanFile = "cleaned.xml"; // Created in same directory as script
+
+// Get absolute path for logging
+$cleanFileAbsolute = realpath(dirname(__FILE__)) . DIRECTORY_SEPARATOR . $cleanFile;
 
 // Configuration
 $BATCH_SIZE = 1000; // Insert in batches of 1000 records
@@ -113,6 +116,8 @@ logInfo("====================================== XML Import Started =============
 logInfo("Configuration", [
     'input_file' => $input,
     'clean_file' => $cleanFile,
+    'clean_file_full_path' => $cleanFileAbsolute,
+    'script_directory' => dirname(__FILE__),
     'batch_size' => $BATCH_SIZE,
     'progress_interval' => $PROGRESS_INTERVAL,
     'memory_limit' => ini_get('memory_limit'),
@@ -375,16 +380,16 @@ try {
                     try {
                         // Insert batch
                         foreach ($batch as $rowIndex => $row) {
-                            $insertResult = $insert->execute($row);
-                            if ($insertResult === false) {
-                                $errorInfo = $insert->errorInfo();
-                                logError("Failed to insert voucher record", null, [
-                                    'batch_number' => $batchCount + 1,
-                                    'row_in_batch' => $rowIndex,
-                                    'guid' => $row[0],
-                                    'pdo_error' => $errorInfo
-                                ]);
-                            }
+                            // $insertResult = $insert->execute($row);
+                            // if ($insertResult === false) {
+                            //     $errorInfo = $insert->errorInfo();
+                            //     logError("Failed to insert voucher record", null, [
+                            //         'batch_number' => $batchCount + 1,
+                            //         'row_in_batch' => $rowIndex,
+                            //         'guid' => $row[0],
+                            //         'pdo_error' => $errorInfo
+                            //     ]);
+                            // }
                         }
                         
                         // Commit transaction
@@ -499,15 +504,15 @@ try {
         logInfo("Inserting remaining records in final batch", ['count' => count($batch)]);
         try {
             foreach ($batch as $rowIndex => $row) {
-                $insertResult = $insert->execute($row);
-                if ($insertResult === false) {
-                    $errorInfo = $insert->errorInfo();
-                    logError("Failed to insert voucher in final batch", null, [
-                        'row_in_batch' => $rowIndex,
-                        'guid' => $row[0],
-                        'pdo_error' => $errorInfo
-                    ]);
-                }
+                // $insertResult = $insert->execute($row);
+                // if ($insertResult === false) {
+                //     $errorInfo = $insert->errorInfo();
+                //     logError("Failed to insert voucher in final batch", null, [
+                //         'row_in_batch' => $rowIndex,
+                //         'guid' => $row[0],
+                //         'pdo_error' => $errorInfo
+                //     ]);
+                // }
             }
             $pdo->commit();
             $batchCount++;
