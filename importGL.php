@@ -9,7 +9,7 @@ try {
     $pdo = new PDO("mysql:host=localhost;dbname=wasan_tally_dec", "root", "");
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
-    $tallyCompanyId = 1;
+    $tallyCompanyId = 2;
 
     $filePath = "Master.xml";
     if (!file_exists($filePath)) {
@@ -47,22 +47,38 @@ try {
     $insert = $pdo->prepare("INSERT INTO ledgers (name, type, parent_name, guid, tally_company_id) VALUES (:name, :type, :parent, :guid, :tally_company_id)");
 
     foreach ($xml->BODY->IMPORTDATA->REQUESTDATA->TALLYMESSAGE as $msg) {
-        if (isset($msg->GROUP)) {
-            $insert->execute([
-                ':name' => (string) $msg->GROUP['NAME'],
-                ':type' => 'group',
-                ':parent' => (string) $msg->GROUP->PARENT ?: null,
-                ':guid' => (string) $msg->GROUP->GUID,
-                ':tally_company_id' => (string) $tallyCompanyId,
-            ]);
-        } elseif (isset($msg->LEDGER)) {
-            $insert->execute([
-                ':name' => (string) $msg->LEDGER['NAME'],
-                ':type' => 'ledger',
-                ':parent' => (string) $msg->LEDGER->PARENT ?: null,
-                ':guid' => (string) $msg->LEDGER->GUID,
-                ':tally_company_id' => (string) $tallyCompanyId,
-            ]);
+        $stmt = $pdo->prepare("
+                    SELECT 1 FROM ledgers 
+                    WHERE guid = :guid 
+                    AND tally_company_id = :tally_company_id 
+                    LIMIT 1");
+
+        $stmt->execute([
+            'guid' => (string) $msg->GROUP->GUID,
+            'tally_company_id' => $tallyCompanyId
+        ]);
+
+        $exists = $stmt->fetchColumn() !== false;
+
+        if (!$exists) {
+
+            if (isset($msg->GROUP)) {
+                $insert->execute([
+                    ':name' => (string) $msg->GROUP['NAME'],
+                    ':type' => 'group',
+                    ':parent' => (string) $msg->GROUP->PARENT ?: null,
+                    ':guid' => (string) $msg->GROUP->GUID,
+                    ':tally_company_id' => (string) $tallyCompanyId,
+                ]);
+            } elseif (isset($msg->LEDGER)) {
+                $insert->execute([
+                    ':name' => (string) $msg->LEDGER['NAME'],
+                    ':type' => 'ledger',
+                    ':parent' => (string) $msg->LEDGER->PARENT ?: null,
+                    ':guid' => (string) $msg->LEDGER->GUID,
+                    ':tally_company_id' => (string) $tallyCompanyId,
+                ]);
+            }
         }
     }
 

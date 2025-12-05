@@ -15,26 +15,27 @@ define('LOG_MAX_SIZE', 10 * 1024 * 1024); // 10MB max log file size
 /**
  * Log messages to file with timestamp
  */
-function logMessage($level, $message, $context = []) {
+function logMessage($level, $message, $context = [])
+{
     $timestamp = date('Y-m-d H:i:s');
     $logEntry = "[$timestamp] [$level] $message";
-    
+
     // Add context if provided
     if (!empty($context)) {
         $logEntry .= " | Context: " . json_encode($context);
     }
-    
+
     $logEntry .= PHP_EOL;
-    
+
     // Rotate log if too large
     if (file_exists(LOG_FILE) && filesize(LOG_FILE) > LOG_MAX_SIZE) {
         $backupFile = LOG_FILE . '.' . date('Y-m-d_His');
         @rename(LOG_FILE, $backupFile);
     }
-    
+
     // Write to log file
     @file_put_contents(LOG_FILE, $logEntry, FILE_APPEND | LOCK_EX);
-    
+
     // Also output to console
     echo $message . PHP_EOL;
 }
@@ -42,30 +43,33 @@ function logMessage($level, $message, $context = []) {
 /**
  * Log error with stack trace
  */
-function logError($message, $exception = null, $context = []) {
+function logError($message, $exception = null, $context = [])
+{
     $errorMsg = "ERROR: $message";
-    
+
     if ($exception instanceof Exception) {
         $errorMsg .= " | Exception: " . $exception->getMessage();
         $errorMsg .= " | File: " . $exception->getFile() . ":" . $exception->getLine();
         $errorMsg .= " | Stack Trace: " . $exception->getTraceAsString();
         $context['exception_class'] = get_class($exception);
     }
-    
+
     logMessage('ERROR', $errorMsg, $context);
 }
 
 /**
  * Log warning
  */
-function logWarning($message, $context = []) {
+function logWarning($message, $context = [])
+{
     logMessage('WARNING', "WARNING: $message", $context);
 }
 
 /**
  * Log info
  */
-function logInfo($message, $context = []) {
+function logInfo($message, $context = [])
+{
     logMessage('INFO', $message, $context);
 }
 
@@ -73,7 +77,8 @@ function logInfo($message, $context = []) {
 /**
  * Format bytes to human readable format
  */
-function formatBytes($bytes, $precision = 2) {
+function formatBytes($bytes, $precision = 2)
+{
     $units = ['B', 'KB', 'MB', 'GB', 'TB'];
     $bytes = max($bytes, 0);
     $pow = floor(($bytes ? log($bytes) : 0) / log(1024));
@@ -85,7 +90,8 @@ function formatBytes($bytes, $precision = 2) {
 /**
  * Format time to human readable format
  */
-function formatTime($seconds) {
+function formatTime($seconds)
+{
     if ($seconds < 60) {
         return number_format($seconds, 2) . ' seconds';
     } elseif ($seconds < 3600) {
@@ -167,7 +173,7 @@ if ($sampleHandle) {
     $firstBytes = fread($sampleHandle, 500);
     fclose($sampleHandle);
     logInfo("First 500 bytes of cleaned XML", ['preview' => substr($firstBytes, 0, 500)]);
-    
+
     // Check for TALLYMESSAGE or root element
     if (strpos($firstBytes, 'TALLYMESSAGE') === false && strpos($firstBytes, '<ENVELOPE') === false) {
         logWarning("TALLYMESSAGE or ENVELOPE not found in first 500 bytes - check XML structure");
@@ -195,14 +201,12 @@ $voucherCount = 0;
 $tallyMsgCount = 0;
 $batchCount = 0;
 $batch = [];
+$tallyCompanyId = 2;
 $startTime = microtime(true);
 
 // Prepared statement for batch insert
-$insert = $pdo->prepare("
-    INSERT INTO vouchers (guid, vouchertype, date, narration, amount)
-    VALUES (?, ?, ?, ?, ?)
-");
-
+$insert = $pdo->prepare("INSERT INTO vouchers (voucher_guid, voucher_number, date, narration, party_ledger_name, voucher_type, created_by, tally_company_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+$ledgerStmt = $pdo->prepare("INSERT INTO voucher_ledger_entries (voucher_id, ledger_name, amount, is_deemed_positive, type, tally_company_id) VALUES (?, ?, ?, ?, ?, ?)");
 // Start transaction
 $pdo->beginTransaction();
 
@@ -210,11 +214,11 @@ try {
     logInfo("Starting XML parsing and import loop");
     $errorCount = 0;
     $skipCount = 0;
-    
+
     $firstElementFound = false;
     $elementCount = 0;
     $rootElement = null;
-    
+
     while ($reader->read()) {
         // Log first few elements to understand structure
         if ($reader->nodeType === XMLReader::ELEMENT && !$firstElementFound) {
@@ -226,7 +230,7 @@ try {
                 'depth' => $reader->depth
             ]);
         }
-        
+
         // Count all elements for debugging
         if ($reader->nodeType === XMLReader::ELEMENT) {
             $elementCount++;
@@ -238,7 +242,7 @@ try {
                 ]);
             }
         }
-        
+
         // Target <TALLYMESSAGE> - can be direct or inside ENVELOPE/BODY
         if ($reader->nodeType === XMLReader::ELEMENT && $reader->name === "TALLYMESSAGE") {
             $tallyMsgCount++;
@@ -246,7 +250,7 @@ try {
             try {
                 // Read into SimpleXML only for this message (more memory efficient)
                 $xmlString = $reader->readOuterXml();
-                
+
                 // Skip empty nodes
                 if (trim($xmlString) === '') {
                     $skipCount++;
@@ -281,48 +285,23 @@ try {
                 $voucherCount++;
 
                 // Read fields - handle missing fields gracefully
-                $guid        = isset($voucher->GUID) ? trim((string)$voucher->GUID) : '';
-                $type        = isset($voucher->VOUCHERTYPENAME) ? trim((string)$voucher->VOUCHERTYPENAME) : '';
-                $date        = isset($voucher->DATE) ? trim((string)$voucher->DATE) : '';
-                $narration   = isset($voucher->NARRATION) ? trim((string)$voucher->NARRATION) : '';
-                
-                // AMOUNT extraction - Tally XML structure
-                // Amount is typically in LEDGERENTRIES.LIST, not direct child
-                $amount = 0;
-                
-                // Method 1: Try direct AMOUNT field (some voucher types have it)
-                if (isset($voucher->AMOUNT) && (string)$voucher->AMOUNT !== '') {
-                    $amount = (float)$voucher->AMOUNT;
-                } 
-                // Method 2: Calculate from LEDGERENTRIES.LIST (most common)
-                elseif (isset($voucher->{'LEDGERENTRIES.LIST'})) {
-                    $totalAmount = 0;
-                    $ledgerEntries = $voucher->{'LEDGERENTRIES.LIST'};
-                    
-                    // Handle both single entry and array of entries
-                    if (is_array($ledgerEntries)) {
-                        foreach ($ledgerEntries as $entry) {
-                            if (isset($entry->AMOUNT) && (string)$entry->AMOUNT !== '') {
-                                $entryAmount = (float)$entry->AMOUNT;
-                                // Tally uses negative for credits, positive for debits
-                                // Sum absolute values to get total voucher amount
-                                $totalAmount += abs($entryAmount);
-                            }
-                        }
-                    } else {
-                        // Single entry (SimpleXML object)
-                        if (isset($ledgerEntries->AMOUNT) && (string)$ledgerEntries->AMOUNT !== '') {
-                            $totalAmount = abs((float)$ledgerEntries->AMOUNT);
-                        }
-                    }
-                    $amount = $totalAmount;
-                }
-                // Method 3: Try ALLINVENTORYENTRIES.LIST (for inventory vouchers)
-                elseif (isset($voucher->{'ALLINVENTORYENTRIES.LIST'})) {
-                    // Similar logic for inventory entries if needed
-                    // For now, amount remains 0
-                }
-                
+                $guid = isset($voucher->GUID) ? trim((string) $voucher->GUID) : '';
+                $voucherNumber = (string) $voucher->VOUCHERNUMBER;
+                $date = DateTime::createFromFormat('Ymd', (string) $voucher->DATE)->format('Y-m-d');
+                $narration = (string) $voucher->NARRATION;
+                $partyLedgerName = (string) $voucher->PARTYLEDGERNAME;
+                $voucherType = (string) $voucher->VOUCHERTYPENAME;
+                $createdBy = (string) $voucher->ENTEREDBY;
+
+                $ledgerEntries = $voucher->xpath('ALLLEDGERENTRIES.LIST');
+
+                $debitAmount = 0;
+                $creditAmount = 0;
+                $accountLedgerName = '';
+                $instrumentNumber = '';
+                $bankName = '';
+                $billRef = '';
+
                 // Validate required fields
                 if (empty($guid)) {
                     logWarning("Voucher missing GUID, skipping", [
@@ -334,74 +313,53 @@ try {
                     $reader->next();
                     continue;
                 }
-                
-                // Log first few vouchers for structure verification
-                if ($voucherCount <= 5) {
-                    $hasLedgerEntries = isset($voucher->{'LEDGERENTRIES.LIST'});
-                    $hasAmount = isset($voucher->AMOUNT);
-                    $ledgerCount = 0;
-                    
-                    if ($hasLedgerEntries) {
-                        $ledgerEntries = $voucher->{'LEDGERENTRIES.LIST'};
-                        if (is_array($ledgerEntries)) {
-                            $ledgerCount = count($ledgerEntries);
-                        } else {
-                            $ledgerCount = 1; // Single entry
-                        }
-                    }
-                    
-                    logInfo("Sample voucher extracted", [
-                        'voucher_number' => $voucherCount,
-                        'guid' => $guid,
-                        'type' => $type,
-                        'date' => $date,
-                        'narration' => substr($narration, 0, 50),
-                        'has_direct_amount' => $hasAmount,
-                        'has_ledger_entries' => $hasLedgerEntries,
-                        'ledger_entries_count' => $ledgerCount,
-                        'amount_calculated' => $amount
-                    ]);
-                }
-                
-                // Log warning if amount is 0 after processing (might indicate issue)
-                if ($amount == 0 && $voucherCount > 5 && $voucherCount <= 20) {
-                    logWarning("Voucher has zero amount - check LEDGERENTRIES.LIST structure", [
-                        'guid' => $guid,
-                        'type' => $type,
-                        'has_ledger_entries' => isset($voucher->{'LEDGERENTRIES.LIST'})
-                    ]);
-                }
+
+
 
                 // Add to batch
-                $batch[] = [$guid, $type, $date, $narration, $amount];
+                $batch[] = [$guid, $voucherNumber, $date, $narration, $partyLedgerName, $voucherType, $createdBy, $tallyCompanyId, $ledgerEntries];
 
                 // When batch is full, insert and commit
                 if (count($batch) >= $BATCH_SIZE) {
                     try {
                         // Insert batch
                         foreach ($batch as $rowIndex => $row) {
-                            // $insertResult = $insert->execute($row);
-                            // if ($insertResult === false) {
-                            //     $errorInfo = $insert->errorInfo();
-                            //     logError("Failed to insert voucher record", null, [
-                            //         'batch_number' => $batchCount + 1,
-                            //         'row_in_batch' => $rowIndex,
-                            //         'guid' => $row[0],
-                            //         'pdo_error' => $errorInfo
-                            //     ]);
-                            // }
+                            $rowLedgerEntries = isset($row[8]) ? $row[8] : null;
+                            $rowTallyCompanyId = isset($row[7]) ? $row[7] : null;
+                            if (isset($row[8])) {
+                                unset($row[8]);
+                            }
+                            $insertResult = $insert->execute($row);
+                            if ($insertResult === false) {
+                                $errorInfo = $insert->errorInfo();
+                                logError("Failed to insert voucher record", null, [
+                                    'batch_number' => $batchCount + 1,
+                                    'row_in_batch' => $rowIndex,
+                                    'guid' => $row[0],
+                                    'pdo_error' => $errorInfo
+                                ]);
+                            }
+                            $voucherId = $pdo->lastInsertId();
+                            foreach ($ledgerEntries as $entry) {
+                                $ledgerName = (string) $entry->LEDGERNAME;
+                                $amount = (float) $entry->AMOUNT;
+                                $isDeemedPositive = (string) $entry->ISDEEMEDPOSITIVE;
+                                $type = ($isDeemedPositive === "Yes") ? 'Credit' : 'Debit';
+                                $ledgerStmt->execute([$voucherId, $ledgerName, abs($amount), $isDeemedPositive, $type, $tallyCompanyId]);
+
+                            }
                         }
-                        
+
                         // Commit transaction
                         $pdo->commit();
-                        
+
                         // Start new transaction
                         $pdo->beginTransaction();
-                        
+
                         // Clear batch
                         $batch = [];
                         $batchCount++;
-                        
+
                         // Progress update
                         $elapsed = microtime(true) - $startTime;
                         $rate = $elapsed > 0 ? $voucherCount / $elapsed : 0;
@@ -447,7 +405,7 @@ try {
 
                 // Clear SimpleXML from memory
                 unset($msg, $voucher, $xmlString);
-                
+
             } catch (Exception $e) {
                 logError("Error processing TALLYMESSAGE", $e, [
                     'tally_message_count' => $tallyMsgCount,
@@ -455,7 +413,7 @@ try {
                 ]);
                 // Continue processing other messages
             }
-            
+
             // Move reader forward
             $reader->next();
         }
@@ -468,7 +426,7 @@ try {
         'errors' => $errorCount,
         'total_elements_found' => $elementCount
     ]);
-    
+
     if ($tallyMsgCount == 0) {
         logError("No TALLYMESSAGE elements found in XML", null, [
             'total_elements' => $elementCount,
@@ -476,7 +434,7 @@ try {
             'root_element' => $rootElement,
             'suggestion' => 'Check if XML has ENVELOPE root or different structure. XML may need different parsing approach.'
         ]);
-        
+
         // Try to find what elements exist
         $reader->close();
         $reader2 = new XMLReader();
@@ -504,15 +462,29 @@ try {
         logInfo("Inserting remaining records in final batch", ['count' => count($batch)]);
         try {
             foreach ($batch as $rowIndex => $row) {
-                // $insertResult = $insert->execute($row);
-                // if ($insertResult === false) {
-                //     $errorInfo = $insert->errorInfo();
-                //     logError("Failed to insert voucher in final batch", null, [
-                //         'row_in_batch' => $rowIndex,
-                //         'guid' => $row[0],
-                //         'pdo_error' => $errorInfo
-                //     ]);
-                // }
+                $rowLedgerEntries = isset($row[8]) ? $row[8] : null;
+                $rowTallyCompanyId = isset($row[7]) ? $row[7] : null;
+                if (isset($row[8])) {
+                    unset($row[8]);
+                }
+                $insertResult = $insert->execute($row);
+                if ($insertResult === false) {
+                    $errorInfo = $insert->errorInfo();
+                    logError("Failed to insert voucher in final batch", null, [
+                        'row_in_batch' => $rowIndex,
+                        'guid' => $row[0],
+                        'pdo_error' => $errorInfo
+                    ]);
+                }
+                $voucherId = $pdo->lastInsertId();
+                foreach ($ledgerEntries as $entry) {
+                    $ledgerName = (string) $entry->LEDGERNAME;
+                    $amount = (float) $entry->AMOUNT;
+                    $isDeemedPositive = (string) $entry->ISDEEMEDPOSITIVE;
+                    $type = ($isDeemedPositive === "Yes") ? 'Credit' : 'Debit';
+                    $ledgerStmt->execute([$voucherId, $ledgerName, abs($amount), $isDeemedPositive, $type, $tallyCompanyId]);
+
+                }
             }
             $pdo->commit();
             $batchCount++;
@@ -533,7 +505,7 @@ try {
     } catch (Exception $rollbackError) {
         logError("Failed to rollback transaction", $rollbackError);
     }
-    
+
     $reader->close();
     logError("Fatal error during import process", $e, [
         'vouchers_imported' => $voucherCount,
