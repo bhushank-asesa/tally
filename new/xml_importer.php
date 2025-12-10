@@ -207,6 +207,11 @@ $startTime = microtime(true);
 // Prepared statement for batch insert
 $insert = $pdo->prepare("INSERT INTO vouchers (voucher_guid, voucher_number, date, narration, party_ledger_name, voucher_type, created_by, tally_company_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
 $ledgerStmt = $pdo->prepare("INSERT INTO voucher_ledger_entries (voucher_id, ledger_name, amount, is_deemed_positive, type, tally_company_id) VALUES (?, ?, ?, ?, ?, ?)");
+$inventoryStmt = $pdo->prepare("
+    INSERT INTO voucher_inventory_entries
+    (voucher_id, stock_item_name, actual_qty, billed_qty, rate, amount, tally_company_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+");
 // Start transaction
 $pdo->beginTransaction();
 
@@ -294,6 +299,8 @@ try {
                 $createdBy = (string) $voucher->ENTEREDBY;
 
                 $ledgerEntries = $voucher->xpath('ALLLEDGERENTRIES.LIST');
+                $inventoryEntries = $voucher->xpath('ALLINVENTORYENTRIES.LIST');
+                $inventoryAllocationEntries = $voucher->xpath('INVENTORYALLOCATIONS.LIST');
 
                 $debitAmount = 0;
                 $creditAmount = 0;
@@ -317,17 +324,25 @@ try {
 
 
                 // Add to batch
-                $batch[] = [$guid, $voucherNumber, $date, $narration, $partyLedgerName, $voucherType, $createdBy, $tallyCompanyId, $ledgerEntries];
+                $batch[] = [$guid, $voucherNumber, $date, $narration, $partyLedgerName, $voucherType, $createdBy, $tallyCompanyId, $ledgerEntries, $inventoryEntries, $inventoryAllocationEntries];
 
                 // When batch is full, insert and commit
                 if (count($batch) >= $BATCH_SIZE) {
                     try {
                         // Insert batch
                         foreach ($batch as $rowIndex => $row) {
-                            $rowLedgerEntries = isset($row[8]) ? $row[8] : null;
                             $rowTallyCompanyId = isset($row[7]) ? $row[7] : null;
+                            $rowLedgerEntries = isset($row[8]) ? $row[8] : null;
+                            $rowInventoryEntries = isset($row[9]) ? $row[9] : null;
+                            $rowInventoryAllocationEntries = isset($row[10]) ? $row[10] : null;
                             if (isset($row[8])) {
                                 unset($row[8]);
+                            }
+                            if (isset($row[9])) {
+                                unset($row[9]);
+                            }
+                            if (isset($row[10])) {
+                                unset($row[10]);
                             }
                             $insertResult = $insert->execute($row);
                             if ($insertResult === false) {
@@ -347,6 +362,59 @@ try {
                                 $type = ($isDeemedPositive === "Yes") ? 'Credit' : 'Debit';
                                 $ledgerStmt->execute([$voucherId, $ledgerName, abs($amount), $isDeemedPositive, $type, $tallyCompanyId]);
 
+                            }
+                            if ($rowInventoryEntries) {
+                                foreach ($rowInventoryEntries as $inv) {
+
+                                    $stockItemName = (string) $inv->STOCKITEMNAME;
+                                    $actualQty = (string) $inv->ACTUALQTY;
+                                    $billedQty = (string) $inv->BILLEDQTY;
+                                    $rate = (string) $inv->RATE;
+                                    $amount = (float) $inv->AMOUNT;
+                                    if ($stockItemName) {
+                                        $inventoryStmt->execute([
+                                            $voucherId,
+                                            $stockItemName,
+                                            $actualQty,
+                                            $billedQty,
+                                            $rate,
+                                            $amount,
+                                            $tallyCompanyId
+                                        ]);
+                                        if (isset($inv->INVENTORYALLOCATIONS_LIST)) {
+                                            foreach ($inv->INVENTORYALLOCATIONS_LIST as $alloc) {
+                                                insertInventoryAllocation([
+                                                    'voucher_id' => $voucherId,
+                                                    'inventory_entry_id' => $inventoryEntryId,
+                                                    'stock_item_name' => (string) $alloc->stock_item_name ?? null,
+                                                    'godown_name' => (string) $alloc->GODOWNNAME ?? null,
+                                                    'batch_name' => (string) $alloc->BATCHNAME ?? null,
+                                                    'quantity' => (string) $alloc->ACTUALQTY ?? null,
+                                                    'amount' => (string) $alloc->AMOUNT ?? null,
+                                                    'rate' => (string) $alloc->RATE ?? null,
+                                                    'cost_center' => (string) $alloc->COSTCENTRENAME ?? null
+                                                ]);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            if ($rowInventoryAllocationEntries) {
+
+                                foreach ($rowInventoryAllocationEntries as $alloc) {
+
+                                    insertInventoryAllocation([
+                                        'voucher_id' => $voucherId,
+                                        'inventory_entry_id' => null,
+                                        'stock_item_name' => (string) $alloc->stock_item_name ?? null,
+                                        'godown_name' => (string) $alloc->GODOWNNAME ?? null,
+                                        'batch_name' => (string) $alloc->BATCHNAME ?? null,
+                                        'quantity' => (string) $alloc->ACTUALQTY ?? null,
+                                        'amount' => (string) $alloc->AMOUNT ?? null,
+                                        'rate' => (string) $alloc->RATE ?? null,
+                                        'cost_center' => (string) $alloc->COSTCENTRENAME ?? null
+                                    ]);
+                                }
                             }
                         }
 
@@ -464,8 +532,16 @@ try {
             foreach ($batch as $rowIndex => $row) {
                 $rowLedgerEntries = isset($row[8]) ? $row[8] : null;
                 $rowTallyCompanyId = isset($row[7]) ? $row[7] : null;
+                $rowInventoryEntries = isset($row[9]) ? $row[9] : null;
+                $rowInventoryAllocationEntries = isset($row[10]) ? $row[10] : null;
                 if (isset($row[8])) {
                     unset($row[8]);
+                }
+                if (isset($row[9])) {
+                    unset($row[9]);
+                }
+                if (isset($row[10])) {
+                    unset($row[10]);
                 }
                 $insertResult = $insert->execute($row);
                 if ($insertResult === false) {
@@ -484,6 +560,57 @@ try {
                     $type = ($isDeemedPositive === "Yes") ? 'Credit' : 'Debit';
                     $ledgerStmt->execute([$voucherId, $ledgerName, abs($amount), $isDeemedPositive, $type, $tallyCompanyId]);
 
+                }
+                if ($rowInventoryEntries) {
+                    foreach ($rowInventoryEntries as $inv) {
+
+                        $stockItemName = (string) $inv->STOCKITEMNAME;
+                        $actualQty = (string) $inv->ACTUALQTY;
+                        $billedQty = (string) $inv->BILLEDQTY;
+                        $rate = (string) $inv->RATE;
+                        $amount = (float) $inv->AMOUNT;
+                        if ($stockItemName) {
+                            $inventoryStmt->execute([
+                                $voucherId,
+                                $stockItemName,
+                                $actualQty,
+                                $billedQty,
+                                $rate,
+                                $amount,
+                                $tallyCompanyId
+                            ]);
+                            if (isset($inv->INVENTORYALLOCATIONS_LIST)) {
+                                foreach ($inv->INVENTORYALLOCATIONS_LIST as $alloc) {
+                                    insertInventoryAllocation([
+                                        'voucher_id' => $voucherId,
+                                        'inventory_entry_id' => $inventoryEntryId,
+                                        'stock_item_name' => (string) $alloc->stock_item_name ?? null,
+                                        'godown_name' => (string) $alloc->GODOWNNAME ?? null,
+                                        'batch_name' => (string) $alloc->BATCHNAME ?? null,
+                                        'quantity' => (string) $alloc->ACTUALQTY ?? null,
+                                        'amount' => (string) $alloc->AMOUNT ?? null,
+                                        'rate' => (string) $alloc->RATE ?? null,
+                                        'cost_center' => (string) $alloc->COSTCENTRENAME ?? null
+                                    ]);
+                                }
+                            }
+                        }
+                    }
+                }
+                if ($rowInventoryAllocationEntries) {
+                    foreach ($rowInventoryAllocationEntries as $alloc) {
+                        insertInventoryAllocation([
+                            'voucher_id' => $voucherId,
+                            'inventory_entry_id' => null,
+                            'stock_item_name' => (string) $alloc->stock_item_name ?? null,
+                            'godown_name' => (string) $alloc->GODOWNNAME ?? null,
+                            'batch_name' => (string) $alloc->BATCHNAME ?? null,
+                            'quantity' => (string) $alloc->ACTUALQTY ?? null,
+                            'amount' => (string) $alloc->AMOUNT ?? null,
+                            'rate' => (string) $alloc->RATE ?? null,
+                            'cost_center' => (string) $alloc->COSTCENTRENAME ?? null
+                        ]);
+                    }
                 }
             }
             $pdo->commit();
@@ -546,3 +673,28 @@ echo "======================================\n";
 
 logInfo("Import process finished successfully");
 
+function insertInventoryAllocation($data)
+{
+    global $pdo;
+
+    $stmt = $pdo->prepare("
+        INSERT INTO voucher_inventory_allocations
+        (voucher_id,stock_item_name, voucher_inventory_entry_id, godown_name, batch_name, quantity, amount, rate, cost_center)
+        VALUES
+        (:vid, :stock_item_name, :entry_id, :godown, :batch, :qty, :amount, :rate, :cost)
+    ");
+
+    $stmt->execute([
+        ':vid' => $data['voucher_id'],
+        ':stock_item_name' => $data['stock_item_name'],
+        ':entry_id' => $data['inventory_entry_id'],
+        ':godown' => $data['godown_name'],
+        ':batch' => $data['batch_name'],
+        ':qty' => $data['quantity'],
+        ':amount' => $data['amount'],
+        ':rate' => $data['rate'],
+        ':cost' => $data['cost_center'],
+    ]);
+
+    return $pdo->lastInsertId();
+}
