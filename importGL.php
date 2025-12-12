@@ -44,27 +44,31 @@ try {
     }
 
     // Step 1: Import groups and ledgers
-    $insert = $pdo->prepare("INSERT INTO ledgers (name, type, parent_name, guid, tally_company_id) VALUES (:name, :type, :parent, :guid, :tally_company_id)");
+    $insert = $pdo->prepare("INSERT INTO ledgers (name,opening_balance, type, parent_name, guid, tally_company_id) VALUES (:name, :opening_balance, :type, :parent, :guid, :tally_company_id)");
 
     foreach ($xml->BODY->IMPORTDATA->REQUESTDATA->TALLYMESSAGE as $msg) {
+        $guid = isset($msg->GROUP) ? (string) $msg->GROUP->GUID : (string) $msg->LEDGER->GUID;
         $stmt = $pdo->prepare("
-                    SELECT 1 FROM ledgers 
+                    SELECT id FROM ledgers 
                     WHERE guid = :guid 
                     AND tally_company_id = :tally_company_id 
                     LIMIT 1");
 
         $stmt->execute([
-            'guid' => (string) $msg->GROUP->GUID,
+            'guid' => (string) $guid,
             'tally_company_id' => $tallyCompanyId
         ]);
 
-        $exists = $stmt->fetchColumn() !== false;
-
-        if (!$exists) {
+        $existedId = $stmt->fetchColumn();
+        $obj = isset($msg->GROUP) ? $msg->GROUP : $msg->LEDGER;
+        $openingBalance = (string) $obj->OPENINGBALANCE;
+        $openingBalance = $openingBalance && is_numeric($openingBalance) ? $openingBalance : 0;
+        if (!$existedId) {
 
             if (isset($msg->GROUP)) {
                 $insert->execute([
                     ':name' => (string) $msg->GROUP['NAME'],
+                    ':opening_balance' => (float) $openingBalance,
                     ':type' => 'group',
                     ':parent' => (string) $msg->GROUP->PARENT ?: null,
                     ':guid' => (string) $msg->GROUP->GUID,
@@ -73,12 +77,25 @@ try {
             } elseif (isset($msg->LEDGER)) {
                 $insert->execute([
                     ':name' => (string) $msg->LEDGER['NAME'],
+                    ':opening_balance' => (float) $openingBalance,
                     ':type' => 'ledger',
                     ':parent' => (string) $msg->LEDGER->PARENT ?: null,
                     ':guid' => (string) $msg->LEDGER->GUID,
                     ':tally_company_id' => (string) $tallyCompanyId,
                 ]);
             }
+        } else {
+            $updateStmt = $pdo->prepare("
+                UPDATE ledgers 
+                SET opening_balance = :opening_balance, 
+                    updated_at = NOW() 
+                WHERE id = :id
+            ");
+
+            $updateStmt->execute([
+                ':opening_balance' => (float) $openingBalance,
+                ':id' => $existedId
+            ]);
         }
     }
 
